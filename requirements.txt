@@ -4,3 +4,4 @@ openpyxl
 numpy
 xlrd
 pyxlsb
+starlette<0.38.0
