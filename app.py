@@ -51,7 +51,6 @@ if archivo_prov and archivo_int:
     with st.spinner("⚙️ Procesando datos y cruzando información..."):
         
         # 1. Cargar datos
-        # CORRECCIÓN: saltar_filas cambiado a 0 para no borrar los encabezados
         df_prov = cargar_archivo_inteligente(archivo_prov, saltar_filas=0)
         df_int = cargar_archivo_inteligente(archivo_int, saltar_filas=0)
         
@@ -72,7 +71,6 @@ if archivo_prov and archivo_int:
             df_int_flexit = df_int.copy()
             
         # 3. Cruce Inteligente
-        # CORRECCIÓN: Mayúsculas agregadas para coincidir con el Excel
         columna_tracking_interno = 'Tracking Code' 
         if columna_tracking_interno in df_int_flexit.columns:
             df_int_flexit[columna_tracking_interno] = df_int_flexit[columna_tracking_interno].astype(str).str.strip().str.upper()
@@ -109,7 +107,10 @@ if archivo_prov and archivo_int:
         columnas_existentes = [col for col in columnas_deseadas if col in cruce.columns]
         
         reporte_final = cruce[columnas_existentes].copy()
-        reporte_final.fillna('N/A', inplace=True)
+        
+        # CORRECCIÓN: Rellenar con 'N/A' de forma segura solo en columnas de texto
+        columnas_texto = reporte_final.select_dtypes(include=['object', 'string']).columns
+        reporte_final[columnas_texto] = reporte_final[columnas_texto].fillna('N/A')
         
         # --- MÉTRICAS EN PANTALLA ---
         st.success(f"¡Cruce finalizado con éxito usando el método: {metodo_cruce}!")
