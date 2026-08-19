@@ -1,4 +1,4 @@
-import streamlit as st
+port streamlit as st
 import pandas as pd
 import numpy as np
 import io
@@ -51,7 +51,7 @@ if archivo_prov and archivo_int:
     with st.spinner("⚙️ Procesando datos y cruzando información..."):
         
         # 1. Cargar datos
-        df_prov = cargar_archivo_inteligente(archivo_prov, saltar_filas=0)
+        df_prov = cargar_archivo_inteligente(archivo_prov, saltar_filas=4)
         df_int = cargar_archivo_inteligente(archivo_int, saltar_filas=0)
         
         df_prov.columns = df_prov.columns.str.strip()
@@ -71,7 +71,7 @@ if archivo_prov and archivo_int:
             df_int_flexit = df_int.copy()
             
         # 3. Cruce Inteligente
-        columna_tracking_interno = 'Tracking Code' 
+        columna_tracking_interno = 'tracking code'
         if columna_tracking_interno in df_int_flexit.columns:
             df_int_flexit[columna_tracking_interno] = df_int_flexit[columna_tracking_interno].astype(str).str.strip().str.upper()
             cruce = pd.merge(df_prov, df_int_flexit, left_on='Número Tracking', right_on=columna_tracking_interno, how='outer', indicator=True)
@@ -107,10 +107,7 @@ if archivo_prov and archivo_int:
         columnas_existentes = [col for col in columnas_deseadas if col in cruce.columns]
         
         reporte_final = cruce[columnas_existentes].copy()
-        
-        # CORRECCIÓN: Rellenar con 'N/A' de forma segura solo en columnas de texto
-        columnas_texto = reporte_final.select_dtypes(include=['object', 'string']).columns
-        reporte_final[columnas_texto] = reporte_final[columnas_texto].fillna('N/A')
+        reporte_final.fillna('N/A', inplace=True)
         
         # --- MÉTRICAS EN PANTALLA ---
         st.success(f"¡Cruce finalizado con éxito usando el método: {metodo_cruce}!")
