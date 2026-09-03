@@ -9,9 +9,9 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Configuración de la página
-st.set_page_config(page_title="Auditoría Flexit v4.2", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Control Flexit", page_icon="📊", layout="wide")
 
-st.title("📊 Auditoría Definitiva de Envíos v4.2")
+st.title("📊 Control Flexit")
 st.markdown("Verifica cobros, busca FLEX IT, detecta zonas faltantes y **te indica qué precio cargarles**.")
 
 # Tarifas Oficiales Flexit
