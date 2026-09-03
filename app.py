@@ -3,14 +3,16 @@ import pandas as pd
 import numpy as np
 import io
 import openpyxl
+import uuid
+import re
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Configuración de la página
-st.set_page_config(page_title="Auditoría Flexit v3", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Auditoría Flexit v4", page_icon="📊", layout="wide")
 
-st.title("📊 Auditoría Definitiva de Envíos v3.0")
-st.markdown("Verifica cobros bajo tarifario oficial, excluye Snow Flex y detecta zonas faltantes.")
+st.title("📊 Auditoría Definitiva de Envíos v4.0")
+st.markdown("Verifica cobros, excluye Snow Flex, detecta zonas y utiliza **búsqueda inteligente en cascada (Nombres y Códigos Cruzados)**.")
 
 # Tarifas Oficiales Flexit
 TARIFA_CABA = 4610.99
@@ -30,7 +32,7 @@ def cargar_archivo(file_uploader):
         
     header_row_idx = None
     for i, row in df.head(15).iterrows():
-        if row.astype(str).str.contains('Tracking|Pedido|venta ML|ID venta', case=False, na=False).any():
+        if row.astype(str).str.contains('Tracking|Pedido|venta ML|ID venta|Cliente', case=False, na=False).any():
             header_row_idx = i
             break
             
@@ -42,7 +44,13 @@ def cargar_archivo(file_uploader):
     return df
 
 def limpiar_texto(columna):
-    return columna.astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
+    res = columna.astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
+    # Asigna un ID único a los vacíos para que no se crucen entre sí por error
+    return res.apply(lambda x: str(uuid.uuid4()) if x in ['NAN', 'NONE', 'NULL', ''] else x)
+
+def limpiar_nombre(columna):
+    res = columna.astype(str).str.upper().str.replace(r'[^A-Z0-9\s]', '', regex=True).str.replace(r'\s+', ' ', regex=True).str.strip()
+    return res.apply(lambda x: str(uuid.uuid4()) if x in ['NAN', 'NONE', 'NULL', ''] else x)
 
 # --- INTERFAZ DE CARGA ---
 col1, col2 = st.columns(2)
@@ -53,44 +61,89 @@ with col2:
 
 # --- PROCESAMIENTO ---
 if archivo_prov and archivo_int:
-    with st.spinner("⚙️ Analizando y auditando con Tarifario Oficial..."):
+    with st.spinner("⚙️ Ejecutando Motor de Búsqueda en Cascada y auditando..."):
         
         df_prov = cargar_archivo(archivo_prov)
         df_int = cargar_archivo(archivo_int)
         
-        # Limpieza Proveedor
-        if 'Número Tracking' in df_prov.columns:
-            df_prov['Número Tracking'] = limpiar_texto(df_prov['Número Tracking'])
-        if 'ID venta ML' in df_prov.columns:
-            df_prov['ID venta ML'] = limpiar_texto(df_prov['ID venta ML'])
-        if 'CP' in df_prov.columns:
-            df_prov['CP_Num'] = pd.to_numeric(df_prov['CP'].astype(str).str.extract(r'(\d+)')[0], errors='coerce').fillna(0)
-            
-        # Limpieza Sistema
-        if 'Tracking Code' in df_int.columns:
-            df_int['Tracking Code'] = limpiar_texto(df_int['Tracking Code'])
-        if 'Nro Pedido' in df_int.columns:
-            df_int['Nro Pedido'] = limpiar_texto(df_int['Nro Pedido'])
-
-        # Filtro estricto de Transporte: Contiene FLEX pero NO SNOW
+        # Filtro estricto de Transporte en Sistema Interno: Contiene FLEX pero NO SNOW
         if 'Pedido - Transportista' in df_int.columns:
             transporte = df_int['Pedido - Transportista'].astype(str).str.upper()
             condicion_flex = transporte.str.contains('FLEX') & ~transporte.str.contains('SNOW')
             df_int_flexit = df_int[condicion_flex].copy()
         else:
             df_int_flexit = df_int.copy()
-            
-        # Cruce Seguro
-        tiene_tracking = 'Tracking Code' in df_int_flexit.columns and 'Número Tracking' in df_prov.columns
-        tiene_pedido = 'Nro Pedido' in df_int_flexit.columns and 'ID venta ML' in df_prov.columns
 
-        if tiene_tracking:
-            cruce = pd.merge(df_prov, df_int_flexit, left_on='Número Tracking', right_on='Tracking Code', how='outer', indicator=True)
-        elif tiene_pedido:
-            cruce = pd.merge(df_prov, df_int_flexit, left_on='ID venta ML', right_on='Nro Pedido', how='outer', indicator=True)
-        else:
-            st.error("⚠️ Error: No se detectaron columnas clave ('Tracking Code' o 'Nro Pedido').")
-            st.stop()
+        # Generación de Llaves de Cruce Seguras (Proveedor)
+        df_prov['T_P'] = limpiar_texto(df_prov.get('Número Tracking', pd.Series(dtype=str)))
+        df_prov['O_P'] = limpiar_texto(df_prov.get('ID venta ML', pd.Series(dtype=str)))
+        
+        col_nombre_prov = next((col for col in df_prov.columns if 'destinatario' in col.lower() or 'cliente' in col.lower()), 'Nombre Destinatario')
+        df_prov['N_P'] = limpiar_nombre(df_prov.get(col_nombre_prov, pd.Series(dtype=str)))
+        if 'CP' in df_prov.columns:
+            df_prov['CP_Num'] = pd.to_numeric(df_prov['CP'].astype(str).str.extract(r'(\d+)')[0], errors='coerce').fillna(0)
+
+        # Generación de Llaves de Cruce Seguras (Sistema Interno)
+        df_int_flexit['T_I'] = limpiar_texto(df_int_flexit.get('Tracking Code', pd.Series(dtype=str)))
+        df_int_flexit['O_I'] = limpiar_texto(df_int_flexit.get('Nro Pedido', pd.Series(dtype=str)))
+        
+        col_nombre_int = next((col for col in df_int_flexit.columns if 'cliente' in col.lower() or 'destinatario' in col.lower()), 'Cliente')
+        df_int_flexit['N_I'] = limpiar_nombre(df_int_flexit.get(col_nombre_int, pd.Series(dtype=str)))
+
+        # === MOTOR DE BÚSQUEDA EN CASCADA (5 NIVELES) ===
+        matches = []
+        
+        # Nivel 1: Tracking (Prov) == Tracking (Int)
+        m1 = pd.merge(df_prov, df_int_flexit, left_on='T_P', right_on='T_I', how='inner')
+        m1['Nivel_Cruce'] = 'Nivel 1 (Trackings Exactos)'
+        matches.append(m1)
+        
+        un_p = df_prov[~df_prov['T_P'].isin(m1['T_P'])]
+        un_i = df_int_flexit[~df_int_flexit['T_I'].isin(m1['T_I'])]
+
+        # Nivel 2: ID Venta (Prov) == Nro Pedido (Int)
+        m2 = pd.merge(un_p, un_i, left_on='O_P', right_on='O_I', how='inner')
+        m2['Nivel_Cruce'] = 'Nivel 2 (ID Venta Exacto)'
+        matches.append(m2)
+        
+        un_p = un_p[~un_p['O_P'].isin(m2['O_P'])]
+        un_i = un_i[~un_i['O_I'].isin(m2['O_I'])]
+
+        # Nivel 3: Tracking (Prov) == Nro Pedido (Int) -> Cruzado
+        m3 = pd.merge(un_p, un_i, left_on='T_P', right_on='O_I', how='inner')
+        m3['Nivel_Cruce'] = 'Nivel 3 (Tracking Prov -> Pedido Int)'
+        matches.append(m3)
+        
+        un_p = un_p[~un_p['T_P'].isin(m3['T_P'])]
+        un_i = un_i[~un_i['O_I'].isin(m3['O_I'])]
+
+        # Nivel 4: ID Venta (Prov) == Tracking (Int) -> Cruzado
+        m4 = pd.merge(un_p, un_i, left_on='O_P', right_on='T_I', how='inner')
+        m4['Nivel_Cruce'] = 'Nivel 4 (ID Venta Prov -> Tracking Int)'
+        matches.append(m4)
+        
+        un_p = un_p[~un_p['O_P'].isin(m4['O_P'])]
+        un_i = un_i[~un_i['T_I'].isin(m4['T_I'])]
+
+        # Nivel 5: Rescate por Nombre del Cliente
+        m5 = pd.merge(un_p, un_i, left_on='N_P', right_on='N_I', how='inner')
+        m5['Nivel_Cruce'] = 'Nivel 5 (Rescate por Nombre Cliente)'
+        matches.append(m5)
+        
+        un_p = un_p[~un_p['N_P'].isin(m5['N_P'])]
+        un_i = un_i[~un_i['N_I'].isin(m5['N_I'])]
+
+        # Consolidar Resultados
+        un_p['_merge'] = 'left_only'
+        un_p['Nivel_Cruce'] = 'No Encontrado en Sistema'
+        un_i['_merge'] = 'right_only'
+        un_i['Nivel_Cruce'] = 'No Facturado por Flexit'
+
+        all_matched = pd.concat(matches, ignore_index=True)
+        if not all_matched.empty:
+            all_matched['_merge'] = 'both'
+
+        cruce = pd.concat([all_matched, un_p, un_i], ignore_index=True)
 
         # Configuración Monetaria
         col_precio_prov = 'Precio Facturado' if 'Precio Facturado' in cruce.columns else 'Precio'
@@ -149,16 +202,14 @@ if archivo_prov and archivo_int:
                 if costo_sistema > 0:
                     return round(cobro - costo_sistema, 2)
                 else:
-                    # Si no hay costo en sistema, y la tarifa es inventada (ej. $15,000), 
-                    # reclamamos lo que exceda la tarifa máxima oficial como red de seguridad.
                     return round(max(0, cobro - TARIFA_GBA2), 2)
             return 0.0
 
         cruce['Monto_a_Reclamar'] = cruce.apply(calcular_reclamo, axis=1)
 
         # Ordenar columnas para el reporte final
-        columnas_deseadas = ['Número Tracking', 'ID venta ML', 'Nro Pedido', 
-                             'Estado_Flexit', 'Alerta_Sistema_Interno', 'Monto_a_Reclamar', 
+        columnas_deseadas = ['Número Tracking', 'ID venta ML', 'Nro Pedido', col_nombre_int, col_nombre_prov,
+                             'Estado_Flexit', 'Alerta_Sistema_Interno', 'Nivel_Cruce', 'Monto_a_Reclamar', 
                              col_precio_prov, 'Costo de Envío', 'Costo de Envío Cliente', 
                              'Fecha Venta', 'Localidad', 'CP', 'Provincia']
         columnas_existentes = [col for col in columnas_deseadas if col in cruce.columns]
@@ -179,12 +230,14 @@ if archivo_prov and archivo_int:
         total_prov = cruce[cruce['_merge'] != 'right_only'][col_precio_prov].sum()
         total_reclamos = df_reclamos['Monto_a_Reclamar'].sum() if not df_reclamos.empty else 0
         viajes_sin_zona = len(df_zonas)
+        viajes_rescatados = len(cruce[cruce['Nivel_Cruce'].str.contains('Nivel 3|Nivel 4|Nivel 5', na=False)])
         
         st.success("¡Auditoría completada exitosamente!")
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Facturado (Flexit)", f"$ {total_prov:,.2f}")
         m2.metric("Total a Reclamar", f"$ {total_reclamos:,.2f}", delta="Fantasmas y Sobreprecios", delta_color="inverse")
         m3.metric("Fallas del Sistema (Costo $0)", f"{viajes_sin_zona} envíos")
+        m4.metric("Viajes Rescatados (Cruzados)", f"{viajes_rescatados} envíos", help="Viajes encontrados gracias al cruce de nombres y códigos invertidos.")
         
         # --- GENERACIÓN DEL EXCEL ---
         wb = openpyxl.Workbook()
@@ -233,10 +286,12 @@ if archivo_prov and archivo_int:
         ws_dash['C5'].font = Font(color="B22222", bold=True)
         ws_dash['B6'] = "3. Viajes con Zona sin cargar ($0):"
         ws_dash['C6'] = viajes_sin_zona
+        ws_dash['B7'] = "4. Viajes rescatados por Nombres/Códigos:"
+        ws_dash['C7'] = viajes_rescatados
         
-        for r in range(4, 7):
+        for r in range(4, 8):
             ws_dash[f'B{r}'].font = Font(bold=True)
-            if r != 6: ws_dash[f'C{r}'].number_format = '$#,##0.00'
+            if r != 6 and r != 7: ws_dash[f'C{r}'].number_format = '$#,##0.00'
             
         excel_buffer = io.BytesIO()
         wb.save(excel_buffer)
@@ -246,6 +301,6 @@ if archivo_prov and archivo_int:
         st.download_button(
             label="Descargar Auditoría en Excel",
             data=excel_buffer,
-            file_name="Auditoria_Flexit_v3_Definitiva.xlsx",
+            file_name="Auditoria_Flexit_v4_Definitiva.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
