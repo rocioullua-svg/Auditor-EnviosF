@@ -9,10 +9,10 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Configuración de la página
-st.set_page_config(page_title="Auditoría Flexit v4", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Auditoría Flexit v4.1", page_icon="📊", layout="wide")
 
-st.title("📊 Auditoría Definitiva de Envíos v4.0")
-st.markdown("Verifica cobros, excluye Snow Flex, detecta zonas y utiliza **búsqueda inteligente en cascada (Nombres y Códigos Cruzados)**.")
+st.title("📊 Auditoría Definitiva de Envíos v4.1")
+st.markdown("Verifica cobros, busca exactamente **FLEX IT**, incluye vacíos y utiliza búsqueda inteligente en cascada.")
 
 # Tarifas Oficiales Flexit
 TARIFA_CABA = 4610.99
@@ -61,16 +61,18 @@ with col2:
 
 # --- PROCESAMIENTO ---
 if archivo_prov and archivo_int:
-    with st.spinner("⚙️ Ejecutando Motor de Búsqueda en Cascada y auditando..."):
+    with st.spinner("⚙️ Ejecutando Motor de Búsqueda y auditando..."):
         
         df_prov = cargar_archivo(archivo_prov)
         df_int = cargar_archivo(archivo_int)
         
-        # Filtro estricto de Transporte en Sistema Interno: Contiene FLEX pero NO SNOW
+        # Filtro Inteligente de Transporte: Busca exactamente FLEX IT o celdas vacías
         if 'Pedido - Transportista' in df_int.columns:
             transporte = df_int['Pedido - Transportista'].astype(str).str.upper()
-            condicion_flex = transporte.str.contains('FLEX') & ~transporte.str.contains('SNOW')
-            df_int_flexit = df_int[condicion_flex].copy()
+            condicion_flexit = transporte.str.contains('FLEX IT')
+            condicion_vacio = df_int['Pedido - Transportista'].isna() | (transporte == 'NAN') | (transporte == '')
+            
+            df_int_flexit = df_int[condicion_flexit | condicion_vacio].copy()
         else:
             df_int_flexit = df_int.copy()
 
@@ -237,7 +239,7 @@ if archivo_prov and archivo_int:
         m1.metric("Total Facturado (Flexit)", f"$ {total_prov:,.2f}")
         m2.metric("Total a Reclamar", f"$ {total_reclamos:,.2f}", delta="Fantasmas y Sobreprecios", delta_color="inverse")
         m3.metric("Fallas del Sistema (Costo $0)", f"{viajes_sin_zona} envíos")
-        m4.metric("Viajes Rescatados (Cruzados)", f"{viajes_rescatados} envíos", help="Viajes encontrados gracias al cruce de nombres y códigos invertidos.")
+        m4.metric("Viajes Rescatados (Cruzados)", f"{viajes_rescatados} envíos")
         
         # --- GENERACIÓN DEL EXCEL ---
         wb = openpyxl.Workbook()
@@ -301,6 +303,6 @@ if archivo_prov and archivo_int:
         st.download_button(
             label="Descargar Auditoría en Excel",
             data=excel_buffer,
-            file_name="Auditoria_Flexit_v4_Definitiva.xlsx",
+            file_name="Auditoria_Flexit_v4.1.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
