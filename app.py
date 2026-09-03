@@ -9,10 +9,10 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Configuración de la página
-st.set_page_config(page_title="Auditoría Flexit v4.1", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Auditoría Flexit v4.2", page_icon="📊", layout="wide")
 
-st.title("📊 Auditoría Definitiva de Envíos v4.1")
-st.markdown("Verifica cobros, busca exactamente **FLEX IT**, incluye vacíos y utiliza búsqueda inteligente en cascada.")
+st.title("📊 Auditoría Definitiva de Envíos v4.2")
+st.markdown("Verifica cobros, busca FLEX IT, detecta zonas faltantes y **te indica qué precio cargarles**.")
 
 # Tarifas Oficiales Flexit
 TARIFA_CABA = 4610.99
@@ -221,12 +221,15 @@ if archivo_prov and archivo_int:
         # Filtros de Pestañas
         df_reclamos = reporte_final[reporte_final['Monto_a_Reclamar'] > 0].copy()
         
+        # === NUEVA LÓGICA DE ZONAS FALTANTES (Incluye el Precio de Flexit) ===
         df_zonas = cruce[cruce['Alerta_Sistema_Interno'] == 'Falta Zona en Sistema ($0)'].copy()
         if not df_zonas.empty and all(col in df_zonas.columns for col in ['Provincia', 'Localidad', 'CP']):
-            resumen_zonas = df_zonas.groupby(['Provincia', 'Localidad', 'CP']).size().reset_index(name='Veces_No_Cotizado')
+            # Agrupamos también por el precio facturado para saber qué valor cargar en el sistema
+            resumen_zonas = df_zonas.groupby(['Provincia', 'Localidad', 'CP', col_precio_prov]).size().reset_index(name='Veces_No_Cotizado')
+            resumen_zonas = resumen_zonas.rename(columns={col_precio_prov: 'Precio_Cobrado_Flexit'})
             resumen_zonas = resumen_zonas.sort_values(by='Veces_No_Cotizado', ascending=False)
         else:
-            resumen_zonas = pd.DataFrame(columns=['Provincia', 'Localidad', 'CP', 'Veces_No_Cotizado'])
+            resumen_zonas = pd.DataFrame(columns=['Provincia', 'Localidad', 'CP', 'Precio_Cobrado_Flexit', 'Veces_No_Cotizado'])
 
         # --- MÉTRICAS EN PANTALLA ---
         total_prov = cruce[cruce['_merge'] != 'right_only'][col_precio_prov].sum()
@@ -303,6 +306,6 @@ if archivo_prov and archivo_int:
         st.download_button(
             label="Descargar Auditoría en Excel",
             data=excel_buffer,
-            file_name="Auditoria_Flexit_v4.1.xlsx",
+            file_name="Auditoria_Flexit_v4.2.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
